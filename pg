@@ -31,6 +31,7 @@ class PG(object):
         self.make_temp_files()
         print "Start..."
         print "TmpDir {0}".format(self.tmp_dir)
+        print "OutDir {0}".format(self.config_outdir)
 
         self.merge_proto_to_one_file()
 
@@ -41,7 +42,7 @@ class PG(object):
 
 
     def exit(self, exit_code=0):
-        #shutil.rmtree(self.tmp_dir)
+        shutil.rmtree(self.tmp_dir)
         sys.exit(exit_code)
 
 
@@ -157,6 +158,8 @@ class PG(object):
         generate_protocol_dll()
         generate_precompile_dll()
 
+        return [config_pro_out, config_pre_out, os.path.basename(config_protobufdll)]
+
 
     @keep_path
     def process_erlang(self):
@@ -173,6 +176,7 @@ class PG(object):
 
         proto_name = "{0}.proto".format(config_filename)
         shutil.copy(os.path.basename(self.tmp_proto_file), proto_name)
+        shutil.copy(config_gpb_hrl, self.tmp_dir)
 
         cmd = [config_protoc_erl,
                "-o", ".",
@@ -185,6 +189,11 @@ class PG(object):
 
         self.run_subprocess(cmd)
 
+        return ["{0}.erl".format(config_filename),
+                "{0}.hrl".format(config_filename),
+                os.path.basename(config_gpb_hrl),
+                ]
+
 
     @keep_path
     def process_python(self):
@@ -193,6 +202,8 @@ class PG(object):
 
         os.chdir(self.tmp_dir)
 
+        config_filename = self.cf.get('python', 'filename')
+
         cmd = [self.config_protoc,
                "--python_out=.",
                os.path.basename(self.tmp_proto_file)
@@ -200,7 +211,22 @@ class PG(object):
 
         self.run_subprocess(cmd)
 
+        pb2 = "{0}_pb2.py".format(os.path.basename(self.tmp_proto_file))
+        shutil.copy(pb2, config_filename)
 
+        return [config_filename]
+
+
+
+
+
+    def copy_to_outdir(self, section, files):
+        folder = os.path.join(self.config_outdir, section)
+        if not os.path.isdir(folder):
+            os.makedirs(folder, 0755)
+        for f in files:
+            f_path = os.path.join(self.tmp_dir, f)
+            shutil.copy(f_path, folder)
 
 
     def run(self):
@@ -210,7 +236,11 @@ class PG(object):
 
             method_name = 'process_{0}'.format(section)
             method = getattr(self, method_name)
-            method()
+            files = method()
+
+            self.copy_to_outdir(section, files)
+
+        self.exit()
 
 
 
