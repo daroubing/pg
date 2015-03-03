@@ -49,11 +49,11 @@ class PG(object):
         outdir = self.cf.get('global', 'outdir')
         if outdir.startswith('/'):
             # absolute path
-            self.outdir = outdir
+            self.config_outdir = outdir
         else:
-            self.outdir = os.path.join(os.getcwd(), outdir)
+            self.config_outdir = os.path.join(os.getcwd(), outdir)
 
-        self.protoc = self.cf.get('global', 'protoc')
+        self.config_protoc = self.cf.get('global', 'protoc')
 
 
     def merge_proto_to_one_file(self):
@@ -74,7 +74,7 @@ class PG(object):
         os.chdir(self.tmp_dir)
 
         name = "{0}.protobin".format(os.path.basename(self.tmp_proto_file))
-        cmd = [self.protoc,
+        cmd = [self.config_protoc,
                "--descriptor_set_out={0}".format(name),
                os.path.basename(self.tmp_proto_file)
                ]
@@ -100,6 +100,7 @@ class PG(object):
 
     @keep_path
     def process_csharp(self):
+        print
         print "Process Charp..."
 
         config_mono = self.cf.get('csharp', 'mono')
@@ -157,8 +158,27 @@ class PG(object):
         generate_precompile_dll()
 
 
+    @keep_path
     def process_erlang(self):
+        print
         print "Process Erlang..."
+
+
+    @keep_path
+    def process_python(self):
+        print
+        print "Process Python"
+
+        os.chdir(self.tmp_dir)
+
+        cmd = [self.config_protoc,
+               "--python_out=.",
+               os.path.basename(self.tmp_proto_file)
+              ]
+
+        self.run_subprocess(cmd)
+
+
 
 
     def run(self):
