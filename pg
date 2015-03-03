@@ -163,6 +163,28 @@ class PG(object):
         print
         print "Process Erlang..."
 
+        os.chdir(self.tmp_dir)
+
+        config_protoc_erl = self.cf.get('erlang', 'protoc-erl')
+        config_gpb_hrl = self.cf.get('erlang', 'gpb_hrl')
+        config_msgprefix = self.cf.get('erlang', 'msgprefix')
+        config_msgsuffix = self.cf.get('erlang', 'msgsuffix')
+        config_filename = self.cf.get('erlang', 'filename')
+
+        proto_name = "{0}.proto".format(config_filename)
+        shutil.copy(os.path.basename(self.tmp_proto_file), proto_name)
+
+        cmd = [config_protoc_erl,
+               "-o", ".",
+               "-I", ".",
+               "-strbin",
+               "-msgprefix", config_msgprefix,
+               "-msgsuffix", config_msgsuffix,
+               proto_name
+              ]
+
+        self.run_subprocess(cmd)
+
 
     @keep_path
     def process_python(self):
