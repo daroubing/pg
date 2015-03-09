@@ -57,7 +57,7 @@ class PG(object):
 
 
     def exit(self, exit_code=0):
-        # shutil.rmtree(self.tmp_dir)
+        shutil.rmtree(self.tmp_dir)
         sys.exit(exit_code)
 
 
@@ -205,10 +205,24 @@ namespace MyProject.Protocol
         {
             using (var ms = new MemoryStream())
             {
-                var ser = new MyProject.Protocol.ProtocolSerializer();
+                var ser = new ProtocolSerializer();
                 ser.Serialize(ms, data);
                 return ms.ToArray();
             }
+        }
+
+        private static byte[] PackWithId(Object data, int id)
+        {
+            var dataBytes = Pack(data);
+
+            id = IPAddress.HostToNetworkOrder(id);
+            var idBytes = BitConverter.GetBytes(id);
+
+            var buffer = new byte[dataBytes.Length + idBytes.Length];
+
+            idBytes.CopyTo(buffer, 0);
+            dataBytes.CopyTo(buffer, idBytes.Length);
+            return buffer;
         }
 
 %s
@@ -226,7 +240,7 @@ namespace MyProject.Protocol
 
             var dataStream = new MemoryStream(dataBytes);
 
-            var ser = new MyProject.Protocol.ProtocolSerializer();
+            var ser = new ProtocolSerializer();
             var protocolType = GetProtocolTypeById(id);
             var msg = ser.Deserialize(dataStream, null, protocolType);
 
@@ -241,17 +255,7 @@ namespace MyProject.Protocol
             pack_with_id_template = """
         public static byte[] PackWithId(MyProject.Protocol.Define.%s data)
         {
-            var id = %s;
-            var dataBytes = Pack(data);
-
-            id = IPAddress.HostToNetworkOrder(id);
-            var idBytes = BitConverter.GetBytes(id);
-
-            byte[] buffer = new byte[dataBytes.Length + idBytes.Length];
-
-            idBytes.CopyTo(buffer, 0);
-            dataBytes.CopyTo(buffer, idBytes.Length);
-            return buffer;
+            return PackWithId(data, %s);
         }
             """
 
@@ -268,7 +272,7 @@ namespace MyProject.Protocol
 
             method_dispatcher = []
             for name, _id in self.define_items:
-                line = "            {typeof(MyProject.Protocol.Define.%s), (Object o) => MyProject.Protocol.Implement.%s.Process((MyProject.Protocol.Define.%s)o)}," % (
+                line = "            {typeof(MyProject.Protocol.Define.%s), o => MyProject.Protocol.Implement.%s.Process((MyProject.Protocol.Define.%s)o)}," % (
                     name, name, name
                 )
                 method_dispatcher.append(line)
