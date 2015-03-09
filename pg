@@ -25,6 +25,16 @@ class PG(object):
     PROTOFILE = "protocol"
 
     def __init__(self, configfile, protofiles):
+        proto_dir = os.path.dirname(os.path.realpath(protofiles[0]))
+        self.define_ini = os.path.join(proto_dir, 'define.ini')
+        if not os.path.exists(self.define_ini):
+            raise OSError("No 'define.ini' Found in proto dirs")
+
+        _define_ini = ConfigParser.ConfigParser()
+        _define_ini.optionxform = str
+        _define_ini.read(self.define_ini)
+        self.define_items = _define_ini.items('define')
+
         self.protofiles = protofiles
         self.cf = ConfigParser.ConfigParser()
         self.cf.read(configfile)
@@ -43,7 +53,7 @@ class PG(object):
 
 
     def exit(self, exit_code=0):
-        shutil.rmtree(self.tmp_dir)
+        # shutil.rmtree(self.tmp_dir)
         sys.exit(exit_code)
 
 
@@ -71,7 +81,7 @@ class PG(object):
 
 
     def run_subprocess(self, cmd):
-        print "Run: {0}".format(' '.join(cmd))
+        # print "Run: {0}".format(' '.join(cmd))
         pipe = subprocess.PIPE
         p = subprocess.Popen(cmd, stdout=pipe, stderr=pipe)
         exitcode = p.wait()
@@ -153,9 +163,159 @@ class PG(object):
 
             self.run_subprocess(cmd)
 
+        def generate_protocol_handler_file():
+            print "Generate Protocol Handler File..."
+            os.makedirs(os.path.join('Protocol', 'Handler'))
+            file_name = os.path.join('Protocol', 'Handler', 'Handler.cs')
+            template = """
+using System;
+using System.IO;
+using System.Net;
+using System.Collections.Generic;
+
+namespace MyProject.Protocol
+{
+
+
+    public static class ProtocolHandler
+    {
+        private readonly static Dictionary<int, Type> IdToTypeDict = new Dictionary<int, Type>{
+%s
+        };
+
+        private readonly static Dictionary<Type, int> TypeToIdDict = new Dictionary<Type, int>{
+%s
+        };
+
+        private readonly static Dictionary<Type, Action<Object>> MethodDispatcher = new Dictionary<Type,  Action<Object>>{
+%s
+        };
+
+        public static Type GetProtocolTypeById(int id)
+        {
+            return IdToTypeDict[id];
+        }
+
+
+        public static byte[] Pack(Object data)
+        {
+            using (var ms = new MemoryStream())
+            {
+                var ser = new MyProject.Protocol.ProtocolSerializer();
+                ser.Serialize(ms, data);
+                return ms.ToArray();
+            }
+        }
+
+%s
+
+        public static void UnPack(byte[] data)
+        {
+            var ms = new MemoryStream(data);
+            var br = new BinaryReader(ms);
+
+            var id = br.ReadInt32();
+            id = IPAddress.NetworkToHostOrder(id);
+
+            var dataBytes = br.ReadBytes(data.Length - 4);
+            ms.Close();
+
+            var dataStream = new MemoryStream(dataBytes);
+
+            var ser = new MyProject.Protocol.ProtocolSerializer();
+            var protocolType = GetProtocolTypeById(id);
+            var msg = ser.Deserialize(dataStream, null, protocolType);
+
+            dataStream.Close();
+
+            MethodDispatcher[protocolType](msg);
+        }
+    }
+}
+"""
+
+            pack_with_id_template = """
+        public static byte[] PackWithId(MyProject.Protocol.Define.%s data)
+        {
+            var id = %s;
+            var dataBytes = Pack(data);
+
+            id = IPAddress.HostToNetworkOrder(id);
+            var idBytes = BitConverter.GetBytes(id);
+
+            byte[] buffer = new byte[dataBytes.Length + idBytes.Length];
+
+            idBytes.CopyTo(buffer, 0);
+            dataBytes.CopyTo(buffer, idBytes.Length);
+            return buffer;
+        }
+            """
+
+
+            id_type_dict = []
+            for name, _id in self.define_items:
+                line = "            {%s, typeof(MyProject.Protocol.Define.%s)}," % (_id, name)
+                id_type_dict.append(line)
+
+            type_id_dict = []
+            for name, _id in self.define_items:
+                line = "            {typeof(MyProject.Protocol.Define.%s), %s}," % (name, _id)
+                type_id_dict.append(line)
+
+            method_dispatcher = []
+            for name, _id in self.define_items:
+                line = "            {typeof(MyProject.Protocol.Define.%s), (Object o) => MyProject.Protocol.Implement.%s.Process((MyProject.Protocol.Define.%s)o)}," % (
+                    name, name, name
+                )
+                method_dispatcher.append(line)
+
+            pack_with_id = []
+            for name, _id in self.define_items:
+                code_area = pack_with_id_template % (name, _id)
+                pack_with_id.append(code_area)
+
+
+            with open(file_name, 'w') as f:
+                file_content = template % (
+                    '\n'.join(id_type_dict),
+                    '\n'.join(type_id_dict),
+                    '\n'.join(method_dispatcher),
+                    '\n'.join(pack_with_id)
+                )
+
+                f.write(file_content)
+
+
+        def generate_protocol_implement_files():
+
+            print "Generate Protocol Implement Files..."
+            os.makedirs(os.path.join('Protocol', 'Implement'))
+            template = """
+using System;
+
+namespace MyProject.Protocol.Implement
+{
+    public static class %s
+    {
+        public static void Process(%s msg)
+        {
+            // Logic here
+        }
+    }
+}
+"""
+            for name, _ in self.define_items:
+                file_name = os.path.join('Protocol', 'Implement', name + '.cs')
+                file_content = template % (name, 'MyProject.Protocol.Define.' + name)
+                with open(file_name, 'w') as f:
+                    f.write(file_content)
+
+
         generate_protocol_csharp()
         generate_protocol_dll()
         generate_precompile_dll()
+        generate_protocol_handler_file()
+        generate_protocol_implement_files()
 
         return [config_pro_out, config_pre_out, os.path.basename(config_protobufdll)]
 
@@ -181,10 +341,17 @@ class PG(object):
                "-o", ".",
                "-I", ".",
                "-strbin",
-               "-msgprefix", config_msgprefix,
-               "-msgsuffix", config_msgsuffix,
                proto_name
               ]
+
+        if config_msgprefix:
+            cmd.append("-msgprefix")
+            cmd.append(config_msgprefix)
+
+        if config_msgsuffix:
+            cmd.append("-msgsuffix")
+            cmd.append(config_msgsuffix)
+
 
         self.run_subprocess(cmd)
 
@@ -196,24 +363,25 @@ class PG(object):
 
     @keep_path
     def process_python(self):
-        print
-        print "Process Python"
-
-        os.chdir(self.tmp_dir)
-
-        config_filename = self.cf.get('python', 'filename')
-
-        cmd = [self.config_protoc,
-               "--python_out=.",
-               os.path.basename(self.tmp_proto_file)
-              ]
-
-        self.run_subprocess(cmd)
-
-        pb2 = "{0}_pb2.py".format(os.path.basename(self.tmp_proto_file))
-        shutil.copy(pb2, config_filename)
-
-        return [config_filename]
+        return []
+        # print
+        # print "Process Python"
+        #
+        # os.chdir(self.tmp_dir)
+        #
+        # config_filename = self.cf.get('python', 'filename')
+        #
+        # cmd = [self.config_protoc,
+        #        "--python_out=.",
+        #        os.path.basename(self.tmp_proto_file)
+        #       ]
+        #
+        # self.run_subprocess(cmd)
+        #
+        # pb2 = "{0}_pb2.py".format(os.path.basename(self.tmp_proto_file))
+        # shutil.copy(pb2, config_filename)
+        #
+        # return [config_filename]
 
 
     def copy_to_outdir(self, section, files):
@@ -237,6 +405,38 @@ class PG(object):
             self.copy_to_outdir(section, files)
 
         self.exit()
+
+
+
+class ProtocolIdDefine(object):
+    # generate a protocol handler file for help pack/unpack message with protocol id
+    def __init__(self, configfile):
+        cf = ConfigParser.ConfigParser()
+        cf.read(configfile)
+        self.items = cf.items('define')
+
+    def process(self):
+        raise NotImplementedError()
+
+
+class ProtocolIdDefineErlang(ProtocolIdDefine):
+    def process(self):
+        template = """
+-module(protocol_handler).
+
+-export([decode/2,
+         encode/1,
+         get_msg_name_by_id/1,
+         get_id_by_msg_name/1]).
+
+
+decode(Msg) ->
+    protocol:decode(Msg)
+
+"""
+
+
+
 
 
 
