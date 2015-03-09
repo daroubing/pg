@@ -335,6 +335,8 @@ namespace MyProject.Protocol.Implement
 
         os.chdir(self.tmp_dir)
 
+        print "Generate erl & hrl files"
+
         config_protoc_erl = self.cf.get('erlang', 'protoc-erl')
         config_gpb_hrl = self.cf.get('erlang', 'gpb_hrl')
         config_msgprefix = self.cf.get('erlang', 'msgprefix')
@@ -367,29 +369,6 @@ namespace MyProject.Protocol.Implement
                 "{0}.hrl".format(config_filename),
                 os.path.basename(config_gpb_hrl),
                 ]
-
-
-    @keep_path
-    def process_python(self):
-        return []
-        # print
-        # print "Process Python"
-        #
-        # os.chdir(self.tmp_dir)
-        #
-        # config_filename = self.cf.get('python', 'filename')
-        #
-        # cmd = [self.config_protoc,
-        #        "--python_out=.",
-        #        os.path.basename(self.tmp_proto_file)
-        #       ]
-        #
-        # self.run_subprocess(cmd)
-        #
-        # pb2 = "{0}_pb2.py".format(os.path.basename(self.tmp_proto_file))
-        # shutil.copy(pb2, config_filename)
-        #
-        # return [config_filename]
 
 
     def copy_to_outdir(self, section, files):
