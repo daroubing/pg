@@ -5,7 +5,6 @@ import re
 import os
 import sys
 import tempfile
-import optparse
 import ConfigParser
 import subprocess
 import shutil
@@ -24,15 +23,20 @@ class PG(object):
     IMPORT_PATTERN = re.compile('^\s*import')
     PROTOFILE = "protocol"
 
-    def __init__(self, configfile, protofiles):
+    def __init__(self, protofiles):
         proto_dir = os.path.dirname(os.path.realpath(protofiles[0]))
-        self.define_ini = os.path.join(proto_dir, 'define.ini')
-        if not os.path.exists(self.define_ini):
-            raise OSError("No 'define.ini' Found in proto dirs")
+        configfile = os.path.join(proto_dir, 'pg.conf')
+        define_ini = os.path.join(proto_dir, 'define.ini')
+
+        if not os.path.exists(configfile):
+            raise  IOError("No 'pg.conf' Found in {0}".format(proto_dir))
+
+        if not os.path.exists(define_ini):
+            raise IOError("No 'define.ini' Found in {0}".format(proto_dir))
 
         _define_ini = ConfigParser.ConfigParser()
         _define_ini.optionxform = str
-        _define_ini.read(self.define_ini)
+        _define_ini.read(define_ini)
         self.define_items = _define_ini.items('define')
 
         self.protofiles = protofiles
@@ -70,18 +74,17 @@ class PG(object):
 
     def merge_proto_to_one_file(self):
         print "Merge Protobufs to One File..."
-        with open(self.tmp_proto_file, 'a') as tmpf:
+        with open(self.tmp_proto_file, 'a') as f:
             for p in self.protofiles:
                 for line in file(p):
                     if self.IMPORT_PATTERN.search(line) is not None:
                         # ignore the `import ...` line
                         continue
 
-                    tmpf.write(line)
+                    f.write(line)
 
 
     def run_subprocess(self, cmd):
-        # print "Run: {0}".format(' '.join(cmd))
         pipe = subprocess.PIPE
         p = subprocess.Popen(cmd, stdout=pipe, stderr=pipe)
         exitcode = p.wait()
@@ -111,22 +114,26 @@ class PG(object):
     @keep_path
     def process_csharp(self):
         print
-        print "Process Charp..."
+        print "[CSharp]"
 
         config_mono = self.cf.get('csharp', 'mono')
         config_gmcs = self.cf.get('csharp', 'gmcs')
         config_protogen = self.cf.get('csharp', 'protogen')
-        config_pro_out = self.cf.get('csharp', 'protogen_out')
-        config_pro_namespace = self.cf.get('csharp', 'protogen_namespace')
-
         config_precompile = self.cf.get('csharp', 'precompile')
-        config_pre_out = self.cf.get('csharp', 'precompile_out')
-        config_pre_namespace = self.cf.get('csharp', 'precompile_namespace')
-
         config_protobufdll = self.cf.get('csharp', 'protobufdll')
 
+        protogen_out = 'ProtocolDefine.dll'
+        protogen_namespace = 'MyProject.Protocol.Define'
+        precompile_out = 'ProtocolSerializer.dll'
+        precompile_type = 'MyProject.Protocol.ProtocolSerializer'
+
+
         cs_file = "{0}.cs".format(os.path.basename(self.tmp_proto_file))
+
         os.chdir(self.tmp_dir)
+
+        shutil.copy(config_protobufdll, self.tmp_dir)
+
         def generate_protocol_csharp():
             print "Generate Csharp File..."
             des_file = self.generate_description()
@@ -135,30 +142,29 @@ class PG(object):
                    config_protogen,
                    "-i:{0}".format(des_file),
                    "-o:{0}".format(cs_file),
-                   "-ns:{0}".format(config_pro_namespace)
+                   "-ns:{0}".format(protogen_namespace)
                    ]
 
             self.run_subprocess(cmd)
 
         def generate_protocol_dll():
-            print "Generate Protocol DLL..."
-            shutil.copy(config_protobufdll, self.tmp_dir)
+            print "ProtoGen DLL..."
             cmd = [config_gmcs,
                    "-t:library",
                    "-r:{0}".format(config_protobufdll),
-                   "-out:{0}".format(config_pro_out),
+                   "-out:{0}".format(protogen_out),
                    cs_file
                    ]
 
             self.run_subprocess(cmd)
 
         def generate_precompile_dll():
-            print "Generate Precompiled DLL..."
+            print "PreCompile DLL..."
             cmd = [config_mono,
                    config_precompile,
-                   config_pro_out,
-                   "-o:{0}".format(config_pre_out),
-                   "-t:{0}".format(config_pre_namespace)
+                   protogen_out,
+                   "-o:{0}".format(precompile_out),
+                   "-t:{0}".format(precompile_type)
                   ]
 
             self.run_subprocess(cmd)
@@ -175,8 +181,6 @@ using System.Collections.Generic;
 
 namespace MyProject.Protocol
 {
-
-
     public static class ProtocolHandler
     {
         private readonly static Dictionary<int, Type> IdToTypeDict = new Dictionary<int, Type>{
@@ -317,13 +321,13 @@ namespace MyProject.Protocol.Implement
         generate_protocol_handler_file()
         generate_protocol_implement_files()
 
-        return [config_pro_out, config_pre_out, os.path.basename(config_protobufdll)]
+        return [protogen_out, precompile_out, os.path.basename(config_protobufdll), 'Protocol']
 
 
     @keep_path
     def process_erlang(self):
         print
-        print "Process Erlang..."
+        print "[Erlang]"
 
         os.chdir(self.tmp_dir)
 
@@ -386,11 +390,15 @@ namespace MyProject.Protocol.Implement
 
     def copy_to_outdir(self, section, files):
         folder = os.path.join(self.config_outdir, section)
-        if not os.path.isdir(folder):
-            os.makedirs(folder, 0755)
+        shutil.rmtree(folder, ignore_errors=True)
+        os.makedirs(folder, 0755)
+
         for f in files:
             f_path = os.path.join(self.tmp_dir, f)
-            shutil.copy(f_path, folder)
+            if os.path.isdir(f_path):
+                shutil.copytree(f_path, os.path.join(folder, f))
+            else:
+                shutil.copy(f_path, folder)
 
 
     def run(self):
@@ -441,22 +449,6 @@ decode(Msg) ->
 
 
 if __name__ == '__main__':
-    parse = optparse.OptionParser()
-    parse.add_option(
-            "-c",
-            dest="configfile",
-            help="config file to use"
-            )
-
-    options, args = parse.parse_args()
-    if not options.configfile:
-        parse.print_help()
-        sys.exit(1)
-
-    if not args:
-        print "No input protobuf files"
-        sys.exit(1)
-
-    pg = PG(options.configfile, args)
+    pg = PG(sys.argv[1:])
     pg.run()
 
