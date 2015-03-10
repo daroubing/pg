@@ -7,7 +7,7 @@
 在这里假设你的 定义文件 a.proto, b.proto 等等都位于 目录A中
 
 *   定义文件中不要加 package, 生成的csharp会自动添加namespace
-*   确保没有message, enum 会重名
+*   确保message, enum 的名字唯一
 *   目录A中需要有 `pg` 用的配置文件 `pg.conf`， 格式参考 此repo中的 pg.conf
 *   目录A中需要有 `pg` 用的给消息ID定义文件 `define.ini`.
 
@@ -60,7 +60,7 @@ out/csharp
     class name: Serializer
     ```
     
-    **NOTE** 你并不会直接使用这个类，见下面的Handler
+    **NOTE** 你并不会直接使用这个类，见下面的 `ProtocolHandler` 类提供的 `Pack/UnPack` 方法
     
 *   脚本自己也生成了一个 `Protocol` 目录。里面的 `MyProject.Protocol.ProtocolHandler` 类提供了非常方便的方法来 打包/解包 数据。
 *   `Implement`目录中的各种 `MessageName.cs` 文件， 其中的 `Process`方法 就是你要写代码的地方，该如何处理数据
@@ -91,7 +91,7 @@ MyMessage = 10
 
 在自己的项目中使用
 
-序列化
+**序列化**
 
 ```csharp
 
@@ -109,7 +109,7 @@ var buffer = MyProject.Protocol.ProtocolHandler.PackWithId(msg);
 
 ```
 
-反序列化
+**反序列化**
 
 ```csharp
 MyProject.Protocol.ProtocolHandler.UnPack(data);
@@ -140,7 +140,7 @@ namespace MyProject.Protocol.Implement
 
 就是这么简单！！！
 
-socket数据首发可以 看 我的这个项目 [YLib][2]
+socket数据收发可以 看 我的这个项目 [YLib][2]
 
 
 
