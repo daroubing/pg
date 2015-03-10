@@ -8,6 +8,7 @@
 
 *   定义文件中不要加 package, 生成的csharp会自动添加namespace
 *   确保message, enum 的名字唯一
+*   message 的名字 不能全部是小写字母。 最好是首字母大写的驼峰命名法。
 *   目录A中需要有 `pg` 用的配置文件 `pg.conf`， 格式参考 此repo中的 pg.conf
 *   目录A中需要有 `pg` 用的给消息ID定义文件 `define.ini`.
 
@@ -148,6 +149,10 @@ socket数据收发可以 看 我的这个项目 [YLib][2]
 
 
 ### Erlang
+
+生成的文件
+
+
 
 
 [1]: https://code.google.com/p/protobuf-net/

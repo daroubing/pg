@@ -38,6 +38,7 @@ class PG(object):
         _define_ini.optionxform = str
         _define_ini.read(define_ini)
         self.define_items = _define_ini.items('define')
+        self.define_items_id_to_name_dict = {_id: _name for _name, _id in self.define_items}
 
         self.protofiles = protofiles
         self.cf = ConfigParser.ConfigParser()
@@ -335,7 +336,7 @@ namespace MyProject.Protocol.Implement
 
         os.chdir(self.tmp_dir)
 
-        print "Generate erl & hrl files"
+        print "Generate erl & hrl files..."
 
         config_protoc_erl = self.cf.get('erlang', 'protoc-erl')
         config_gpb_hrl = self.cf.get('erlang', 'gpb_hrl')
@@ -343,31 +344,146 @@ namespace MyProject.Protocol.Implement
         config_msgsuffix = self.cf.get('erlang', 'msgsuffix')
         config_filename = self.cf.get('erlang', 'filename')
 
-        proto_name = "{0}.proto".format(config_filename)
-        shutil.copy(os.path.basename(self.tmp_proto_file), proto_name)
-        shutil.copy(config_gpb_hrl, self.tmp_dir)
+        msgprefix = config_msgprefix if config_msgprefix else ""
+        msgsuffix = config_msgsuffix if config_msgsuffix else ""
 
-        cmd = [config_protoc_erl,
-               "-o", ".",
-               "-I", ".",
-               "-strbin",
-               proto_name
-              ]
+        def generate_protocol_erl_file():
+            print "Generate {0}.erl & {0}.hrl file...".format(config_filename)
 
-        if config_msgprefix:
-            cmd.append("-msgprefix")
-            cmd.append(config_msgprefix)
+            proto_name = "{0}.proto".format(config_filename)
+            shutil.copy(os.path.basename(self.tmp_proto_file), proto_name)
+            shutil.copy(config_gpb_hrl, self.tmp_dir)
 
-        if config_msgsuffix:
-            cmd.append("-msgsuffix")
-            cmd.append(config_msgsuffix)
+            cmd = [config_protoc_erl,
+                   "-o", ".",
+                   "-I", ".",
+                   "-strbin",
+                   proto_name
+                  ]
+
+            if config_msgprefix:
+                cmd.append("-msgprefix")
+                cmd.append(config_msgprefix)
+
+            if config_msgsuffix:
+                cmd.append("-msgsuffix")
+                cmd.append(config_msgsuffix)
+
+            self.run_subprocess(cmd)
+
+        def generate_protocol_handler_file():
+            file_name = "{0}_handler.erl".format(config_filename)
+
+            print "Generate {0} file...".format(file_name)
+
+            template = """
+-module(%s).
+
+-export([pack/1,
+         pack_with_id/1,
+         unpack/2]).
 
 
-        self.run_subprocess(cmd)
+-include("%s.hrl").
+
+pack(Msg) ->
+    %s:encode_msg(Msg).
+
+pack_with_id(Msg) ->
+    Id = get_msg_id(Msg),
+    Data = pack(Msg),
+    <<Id:32, Data/binary>>.
+
+unpack(DataWithId, ExtraData) ->
+    <<Id:32, Data/binary>> = DataWithId,
+    OriName = get_msg_original_name(Id),
+    MsgName = get_msg_name(Id),
+    DecodedData = %s:decode_msg(Data, MsgName),
+    %s_implement:process({OriName, DecodedData}, ExtraData).
+
+
+%s
+
+
+%s
+
+
+%s
+
+            """
+
+            get_msg_id = []
+            for name, _id in self.define_items:
+                record_type = "#'%s%s%s'{}" % (msgprefix, name, msgsuffix)
+                get_msg_id.append("get_msg_id(%s) -> %s;" % (record_type, _id))
+            get_msg_id[-1] = get_msg_id[-1][:-1] + '.'
+
+            get_msg_name = []
+            for name, _id in self.define_items:
+                msg_name = '%s%s%s' % (msgprefix, name, msgsuffix)
+                get_msg_name.append("get_msg_name(%s) -> '%s';" % (_id, msg_name))
+            get_msg_name[-1] = get_msg_name[-1][:-1] + '.'
+
+            get_msg_original_name = []
+            for name, _id in self.define_items:
+                get_msg_original_name.append("get_msg_original_name(%s) -> '%s';" % (_id, name))
+            get_msg_original_name[-1] = get_msg_original_name[-1][:-1] + '.'
+
+
+            file_content = template % (
+                "{0}_handler".format(config_filename),
+                config_filename,
+                config_filename,
+                config_filename,
+                config_filename,
+                '\n'.join(get_msg_id),
+                '\n'.join(get_msg_name),
+                '\n'.join(get_msg_original_name),
+            )
+
+            with open(file_name, 'w') as f:
+                f.write(file_content)
+
+
+
+        def generate_protocol_implement_file():
+            file_name = "{0}_implement.erl".format(config_filename)
+
+            print "Generate {0} file...".format(file_name)
+
+            template = """
+-module(%s).
+
+-export([process/2]).
+
+%s
+            """
+
+            process_funcs = []
+            for name, _ in self.define_items:
+                line = "process({'%s', Data}, ExtraData) ->\n    ok;" % name
+                process_funcs.append(line)
+            process_funcs[-1] = process_funcs[-1][:-1] + '.'
+
+            file_content = template % (
+                "{0}_implement".format(config_filename),
+                '\n\n'.join(process_funcs)
+            )
+
+            with open(file_name, 'w') as f:
+                f.write(file_content)
+
+
+        generate_protocol_erl_file()
+        generate_protocol_handler_file()
+        generate_protocol_implement_file()
+
 
         return ["{0}.erl".format(config_filename),
                 "{0}.hrl".format(config_filename),
                 os.path.basename(config_gpb_hrl),
+                "{0}_handler.erl".format(config_filename),
+                "{0}_implement.erl".format(config_filename)
                 ]
 
 
@@ -396,38 +512,6 @@ namespace MyProject.Protocol.Implement
             self.copy_to_outdir(section, files)
 
         self.exit()
-
-
-
-class ProtocolIdDefine(object):
-    # generate a protocol handler file for help pack/unpack message with protocol id
-    def __init__(self, configfile):
-        cf = ConfigParser.ConfigParser()
-        cf.read(configfile)
-        self.items = cf.items('define')
-
-    def process(self):
-        raise NotImplementedError()
-
-
-class ProtocolIdDefineErlang(ProtocolIdDefine):
-    def process(self):
-        template = """
--module(protocol_handler).
-
--export([decode/2,
-         encode/1,
-         get_msg_name_by_id/1,
-         get_id_by_msg_name/1]).
-
-
-decode(Msg) ->
-    protocol:decode(Msg)
-
-"""
-
-
-
 
 
 
