@@ -309,13 +309,14 @@ namespace MyProject.Protocol.Implement
         public static void Process(%s msg)
         {
             // Logic here
+            throw new Exception("Not Implemented: %s");
         }
     }
 }
 """
             for name, _ in self.define_items:
                 file_name = os.path.join('Protocol', 'Implement', name + '.cs')
-                file_content = template % (name, 'MyProject.Protocol.Define.' + name)
+                file_content = template % (name, 'MyProject.Protocol.Define.' + name, name)
                 with open(file_name, 'w') as f:
                     f.write(file_content)
 
@@ -381,7 +382,7 @@ namespace MyProject.Protocol.Implement
 
 -export([pack/1,
          pack_with_id/1,
-         unpack/2]).
+         process/2]).
 
 
 -include("%s.hrl").
@@ -394,12 +395,11 @@ pack_with_id(Msg) ->
     Data = pack(Msg),
     <<Id:32, Data/binary>>.
 
-unpack(DataWithId, ExtraData) ->
+process(DataWithId, State) ->
     <<Id:32, Data/binary>> = DataWithId,
-    OriName = get_msg_original_name(Id),
     MsgName = get_msg_name(Id),
     DecodedData = %s:decode_msg(Data, MsgName),
-    %s_implement:process({OriName, DecodedData}, ExtraData).
+    %s_implement:process(DecodedData, State).
 
 
 %s
@@ -407,10 +407,7 @@ unpack(DataWithId, ExtraData) ->
 
 %s
 
-
-%s
-
-            """
+"""
 
             get_msg_id = []
             for name, _id in self.define_items:
@@ -424,12 +421,6 @@ unpack(DataWithId, ExtraData) ->
                 get_msg_name.append("get_msg_name(%s) -> '%s';" % (_id, msg_name))
             get_msg_name[-1] = get_msg_name[-1][:-1] + '.'
 
-            get_msg_original_name = []
-            for name, _id in self.define_items:
-                get_msg_original_name.append("get_msg_original_name(%s) -> '%s';" % (_id, name))
-            get_msg_original_name[-1] = get_msg_original_name[-1][:-1] + '.'
-
-
             file_content = template % (
                 "{0}_handler".format(config_filename),
                 config_filename,
@@ -438,7 +429,6 @@ unpack(DataWithId, ExtraData) ->
                 config_filename,
                 '\n'.join(get_msg_id),
                 '\n'.join(get_msg_name),
-                '\n'.join(get_msg_original_name),
             )
 
             with open(file_name, 'w') as f:
@@ -454,19 +444,30 @@ unpack(DataWithId, ExtraData) ->
             template = """
 -module(%s).
 
+-include("%s.hrl").
+-import("").
+
 -export([process/2]).
 
 %s
-            """
+
+"""
+
+            process_template = """
+process(#'%s'{}, State) ->
+    erlang:error("Not Implement: %s"),
+    State;"""
 
             process_funcs = []
             for name, _ in self.define_items:
-                line = "process({'%s', Data}, ExtraData) ->\n    ok;" % name
+                p = msgprefix + name + msgsuffix
+                line = process_template % (p, p)
                 process_funcs.append(line)
             process_funcs[-1] = process_funcs[-1][:-1] + '.'
 
             file_content = template % (
                 "{0}_implement".format(config_filename),
+                config_filename,
                 '\n\n'.join(process_funcs)
             )
 

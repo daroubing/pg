@@ -152,6 +152,42 @@ socket数据收发可以 看 我的这个项目 [YLib][2]
 
 生成的文件
 
+```
+out/erlang
+    |---- gpb.hrl
+    |---- protocol.hrl
+    |---- protocol.erl
+    |---- protocol_handler.erl
+    |---- protocol_implement.erl
+```
+
+将其拷贝到你的项目中
+
+#### 使用方法
+
+首先还是和上面一样，用 `pg` 生成代码
+
+如果你的`pg.conf` 中 没有设置 `msg_prefix` 和 `msg_suffix`， 那么 `MyMessage` 回生成一个 `#'MyMessage'{id, name}` 的 record
+
+在代码中需要 `-include("protocol.hrl")`，
+
+并且把你项目中登录用户的 record 也单独放到一个 `.hrl` 文件中， 让 `protocol_implement.hrl` 也 include 这个 `.hrl` 文件
+
+**序列化**
+
+```erlang
+Msg = #'MyMessage'{id = 1, name = <<"Tom">>},
+Data = protocol_handler:pack_with_id(Msg),
+
+%% 完毕，直接用gen_tcp:send() 可以讲Data发送出去
+```
+
+**反序列化**
+```erlang
+NewState = protocol_handler:process(Data, State),
+%% 完毕， 因为pg生成的代码是嵌入基于OTP设计的项目中使用的。所以这里有 State 这个参数
+%% 具体处理逻辑需要到 protocol_implement.erl 中去实现。
+```
 
 
 
