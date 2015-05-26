@@ -98,6 +98,7 @@ class PG(object):
 
         return stdout
 
+
     @keep_path
     def generate_description(self):
         print "Generate Protobuf Description..."
@@ -118,15 +119,15 @@ class PG(object):
         print "[CSharp]"
 
         config_mono = self.cf.get('csharp', 'mono')
-        config_gmcs = self.cf.get('csharp', 'gmcs')
+        config_mcs = self.cf.get('csharp', 'mcs')
         config_protogen = self.cf.get('csharp', 'protogen')
         config_precompile = self.cf.get('csharp', 'precompile')
         config_protobufdll = self.cf.get('csharp', 'protobufdll')
 
         protogen_out = 'ProtocolDefine.dll'
-        protogen_namespace = 'MyProject.Protocol.Define'
+        protogen_namespace = 'Protocol.Define'
         precompile_out = 'ProtocolSerializer.dll'
-        precompile_type = 'MyProject.Protocol.ProtocolSerializer'
+        precompile_type = 'Protocol.Serializer'
 
 
         cs_file = "{0}.cs".format(os.path.basename(self.tmp_proto_file))
@@ -148,9 +149,12 @@ class PG(object):
 
             self.run_subprocess(cmd)
 
+
         def generate_protocol_dll():
             print "ProtoGen DLL..."
-            cmd = [config_gmcs,
+            cmd = [config_mcs,
+                   "-debug-",
+                   "-sdk:2",
                    "-t:library",
                    "-r:{0}".format(config_protobufdll),
                    "-out:{0}".format(protogen_out),
@@ -158,6 +162,7 @@ class PG(object):
                    ]
 
             self.run_subprocess(cmd)
+
 
         def generate_precompile_dll():
             print "PreCompile DLL..."
@@ -170,25 +175,22 @@ class PG(object):
 
             self.run_subprocess(cmd)
 
+
         def generate_protocol_handler_file():
             print "Generate Protocol Handler File..."
-            os.makedirs(os.path.join('Protocol', 'Handler'))
-            file_name = os.path.join('Protocol', 'Handler', 'Handler.cs')
+            os.makedirs('Protocol')
+            file_name = os.path.join('Protocol', 'Handler.cs')
             template = """
 using System;
 using System.IO;
 using System.Net;
 using System.Collections.Generic;
 
-namespace MyProject.Protocol
+namespace Protocol
 {
     public static class ProtocolHandler
     {
-        private readonly static Dictionary<int, Type> IdToTypeDict = new Dictionary<int, Type>{
-%s
-        };
-
-        private readonly static Dictionary<Type, int> TypeToIdDict = new Dictionary<Type, int>{
+        private readonly static Dictionary<Int16, Type> IdToTypeDict = new Dictionary<Int16, Type>{
 %s
         };
 
@@ -196,7 +198,7 @@ namespace MyProject.Protocol
 %s
         };
 
-        public static Type GetProtocolTypeById(int id)
+        public static Type GetProtocolTypeById(Int16 id)
         {
             return IdToTypeDict[id];
         }
@@ -206,13 +208,13 @@ namespace MyProject.Protocol
         {
             using (var ms = new MemoryStream())
             {
-                var ser = new ProtocolSerializer();
+                var ser = new Serializer();
                 ser.Serialize(ms, data);
                 return ms.ToArray();
             }
         }
 
-        private static byte[] PackWithId(Object data, int id)
+        private static byte[] PackWithId(Object data, Int16 id)
         {
             var dataBytes = Pack(data);
 
@@ -226,22 +228,21 @@ namespace MyProject.Protocol
             return buffer;
         }
 
-%s
 
-        public static void UnPack(byte[] data)
+        public static void Process(byte[] data)
         {
             var ms = new MemoryStream(data);
             var br = new BinaryReader(ms);
 
-            var id = br.ReadInt32();
+            var id = br.ReadInt16();
             id = IPAddress.NetworkToHostOrder(id);
 
-            var dataBytes = br.ReadBytes(data.Length - 4);
+            var dataBytes = br.ReadBytes(data.Length - 2);
             ms.Close();
 
             var dataStream = new MemoryStream(dataBytes);
 
-            var ser = new ProtocolSerializer();
+            var ser = new Serializer();
             var protocolType = GetProtocolTypeById(id);
             var msg = ser.Deserialize(dataStream, null, protocolType);
 
@@ -249,31 +250,29 @@ namespace MyProject.Protocol
 
             MethodDispatcher[protocolType](msg);
         }
+
+%s
+
     }
 }
 """
 
             pack_with_id_template = """
-        public static byte[] PackWithId(MyProject.Protocol.Define.%s data)
+        public static byte[] PackWithId(Protocol.Define.%s data)
         {
             return PackWithId(data, %s);
         }
             """
 
-
             id_type_dict = []
             for name, _id in self.define_items:
-                line = "            {%s, typeof(MyProject.Protocol.Define.%s)}," % (_id, name)
+                line = "            {%s, typeof(Protocol.Define.%s)}," % (_id, name)
                 id_type_dict.append(line)
 
-            type_id_dict = []
-            for name, _id in self.define_items:
-                line = "            {typeof(MyProject.Protocol.Define.%s), %s}," % (name, _id)
-                type_id_dict.append(line)
 
             method_dispatcher = []
             for name, _id in self.define_items:
-                line = "            {typeof(MyProject.Protocol.Define.%s), o => MyProject.Protocol.Implement.%s.Process((MyProject.Protocol.Define.%s)o)}," % (
+                line = "            {typeof(Protocol.Define.%s), o => Protocol.Implement.%s.Process((Protocol.Define.%s)o)}," % (
                     name, name, name
                 )
                 method_dispatcher.append(line)
@@ -287,7 +286,6 @@ namespace MyProject.Protocol
             with open(file_name, 'w') as f:
                 file_content = template % (
                     '\n'.join(id_type_dict),
-                    '\n'.join(type_id_dict),
                     '\n'.join(method_dispatcher),
                     '\n'.join(pack_with_id)
                 )
@@ -300,23 +298,21 @@ namespace MyProject.Protocol
             print "Generate Protocol Implement Files..."
             os.makedirs(os.path.join('Protocol', 'Implement'))
             template = """
-using System;
-
-namespace MyProject.Protocol.Implement
+namespace Protocol.Implement
 {
     public static class %s
     {
         public static void Process(%s msg)
         {
             // Logic here
-            throw new Exception("Not Implemented: %s");
+            throw new System.Exception("Not Implemented: %s");
         }
     }
 }
 """
             for name, _ in self.define_items:
                 file_name = os.path.join('Protocol', 'Implement', name + '.cs')
-                file_content = template % (name, 'MyProject.Protocol.Define.' + name, name)
+                file_content = template % (name, 'Protocol.Define.' + name, name)
                 with open(file_name, 'w') as f:
                     f.write(file_content)
 
@@ -393,10 +389,10 @@ pack(Msg) ->
 pack_with_id(Msg) ->
     Id = get_msg_id(Msg),
     Data = pack(Msg),
-    <<Id:32, Data/binary>>.
+    <<Id:16, Data/binary>>.
 
 process(DataWithId, State) ->
-    <<Id:32, Data/binary>> = DataWithId,
+    <<Id:16, Data/binary>> = DataWithId,
     MsgName = get_msg_name(Id),
     DecodedData = %s:decode_msg(Data, MsgName),
     %s_implement:process(DecodedData, State).
@@ -408,7 +404,6 @@ process(DataWithId, State) ->
 %s
 
 """
-
             get_msg_id = []
             for name, _id in self.define_items:
                 record_type = "#'%s%s%s'{}" % (msgprefix, name, msgsuffix)
@@ -445,7 +440,6 @@ process(DataWithId, State) ->
 -module(%s).
 
 -include("%s.hrl").
--import("").
 
 -export([process/2]).
 
@@ -515,8 +509,6 @@ process(#'%s'{}, State) ->
         self.exit()
 
 
-
 if __name__ == '__main__':
     pg = PG(sys.argv[1:])
     pg.run()
-

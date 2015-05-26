@@ -2,13 +2,18 @@
 
 一个从protobuf定义文件自动生产代码的脚本
 
+## 约定
+
+*   目前默认消息ID为 Int16, 也就是2Bytes
+
+
 ## protobuf定义文件要求
 
 在这里假设你的 定义文件 a.proto, b.proto 等等都位于 目录A中
 
 *   定义文件中不要加 package, 生成的csharp会自动添加namespace
-*   确保message, enum 的名字唯一
-*   message 的名字 不能全部是小写字母。 最好是首字母大写的驼峰命名法。
+*   确保message, enum 的名字全局唯一
+*   message 的名字 建议是首字母大写的驼峰命名法。比如 `message PlayerAction {...}`
 *   目录A中需要有 `pg` 用的配置文件 `pg.conf`， 格式参考 此repo中的 pg.conf
 *   目录A中需要有 `pg` 用的给消息ID定义文件 `define.ini`.
 
@@ -37,8 +42,7 @@ out/csharp
     |----ProtocolSerializer.dll
     |----protobuf-net.dll
     |----Protocol
-            |----Handler
-            |       |----Handler.cs
+            |----Handler.cs
             |
             |----Implement
                     |----MessageOne.cs
@@ -50,20 +54,22 @@ out/csharp
 *   在Mono环境下 用 [protobuf-net][1] 来生成对应的csharp文件，并且将其编译为一个`ProtocolDefine.dll`文件。 
 
     ```
-    namespace:  MyProject.Protocol.Define
+    namespace:  Protocol.Define
     class name: 就是定义中的各种 message 的名字
     ```
     
-*   用预编译 `precompile` 来避免在IOS设备上的问题。产生的文件为 `ProtocolSerializer.dll`
+*   用预编译 `precompile` 来避免在IOS设备上的AOT问题。产生的文件为 `ProtocolSerializer.dll`
 
     ```
-    namespace:  MyProject.Protocol
+    namespace:  Protocol
     class name: Serializer
     ```
     
-    **NOTE** 你并不会直接使用这个类，见下面的 `ProtocolHandler` 类提供的 `Pack/UnPack` 方法
+    **NOTE: 你并不会直接使用这个类，见下面的 `ProtocolHandler` 类提供的 `Pack/Process` 方法**
     
-*   脚本自己也生成了一个 `Protocol` 目录。里面的 `MyProject.Protocol.ProtocolHandler` 类提供了非常方便的方法来 打包/解包 数据。
+    
+*   脚本自己也生成了一个 `Protocol` 目录。里面的 `Protocol.ProtocolHandler` 类提供了非常方便的方法来 打包/解包 数据。
+
 *   `Implement`目录中的各种 `MessageName.cs` 文件， 其中的 `Process`方法 就是你要写代码的地方，该如何处理数据
 
 #### 使用方法
@@ -97,14 +103,14 @@ MyMessage = 10
 ```csharp
 
 // 首先实例化一个消息
-var msg = MyProject.Protocol.Define.MyMessage();
+var msg = new Protocol.Define.MyMessage();
 
 // 填充数据
 msg.id = 1;
 msg.name = "Alex";
 
 // 把消息ID和消息一起序列化. 
-var buffer = MyProject.Protocol.ProtocolHandler.PackWithId(msg);
+var data = Protocol.ProtocolHandler.PackWithId(msg);
 
 // 完毕。 buffer 类型是 byte[]。 你可以将其通过socket发送出去
 
@@ -113,7 +119,7 @@ var buffer = MyProject.Protocol.ProtocolHandler.PackWithId(msg);
 **反序列化**
 
 ```csharp
-MyProject.Protocol.ProtocolHandler.UnPack(data);
+Protocol.ProtocolHandler.Process(data);
 
 // data 是待处理数据， 类型是 byte[].
 
@@ -122,13 +128,11 @@ MyProject.Protocol.ProtocolHandler.UnPack(data);
 你要自己去实现生成的 `Protocol/Implement/MyMessage.cs` 文件中的 `Process` 方法
 
 ```csharp
-using System;
-
-namespace MyProject.Protocol.Implement
+namespace Protocol.Implement
 {
     public static class MyMessage
     {
-        public static void Process(MyProject.Protocol.Define.MyMessage msg)
+        public static void Process(Protocol.Define.MyMessage msg)
         {
             // Logic here
             Console.WriteLine("id = {0}, name = {1}", msg.id, msg.name)
@@ -171,7 +175,6 @@ out/erlang
 
 在代码中需要 `-include("protocol.hrl")`，
 
-并且把你项目中登录用户的 record 也单独放到一个 `.hrl` 文件中， 让 `protocol_implement.hrl` 也 include 这个 `.hrl` 文件
 
 **序列化**
 
@@ -179,7 +182,7 @@ out/erlang
 Msg = #'MyMessage'{id = 1, name = <<"Tom">>},
 Data = protocol_handler:pack_with_id(Msg),
 
-%% 完毕，直接用gen_tcp:send() 可以讲Data发送出去
+%% 完毕，直接用gen_tcp:send() 将Data发送出去
 ```
 
 **反序列化**
